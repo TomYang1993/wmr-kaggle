@@ -1,0 +1,17 @@
+{
+  "id": "yxyxtx/wmr-overlay-check",
+  "title": "wmr overlay check",
+  "code_file": "wmr-overlay-check.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "yxyxtx/watermark-removal-core-code",
+    "yxyxtx/huohua-studio-test-data",
+    "yxyxtx/wmr-ocr-models"
+  ],
+  "kernel_sources": [],
+  "competition_sources": []
+}

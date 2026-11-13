@@ -1,0 +1,6 @@
+# Kaggle GPU notebook (2x T4). torch, numpy, scipy, opencv and pillow are preinstalled.
+av>=11
+rapidocr>=3.10
+onnx
+onnxconverter-common   # fp16 OCR det model for the T4 (wmr/detect.py)
+# then swap the CPU ONNX Runtime for the GPU build (see scripts/setup_kaggle.sh)

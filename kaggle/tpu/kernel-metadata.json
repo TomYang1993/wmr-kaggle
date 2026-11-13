@@ -1,0 +1,17 @@
+{
+  "id": "yxyxtx/wmr-tpu-cpu-probe",
+  "title": "wmr tpu cpu probe",
+  "code_file": "wmr-tpu-cpu-probe.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "yxyxtx/watermark-removal-core-code",
+    "yxyxtx/huohua-studio-test-data"
+  ],
+  "kernel_sources": [],
+  "competition_sources": []
+}

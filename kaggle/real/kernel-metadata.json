@@ -1,0 +1,16 @@
+{
+  "id": "yxyxtx/wmr-production-test",
+  "title": "wmr production test",
+  "code_file": "wmr-production-test.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "yxyxtx/watermark-removal-core-code",
+    "yxyxtx/YOUR-VIDEO-DATASET"
+  ],
+  "kernel_sources": [],
+  "competition_sources": []
+}

@@ -1,0 +1,10 @@
+# macOS on Apple Silicon. OCR runs on CPU; the built-in fill is CPU/OpenCV.
+numpy
+scipy
+pillow>=10.1
+opencv-python-headless
+av>=11
+rapidocr>=3.10
+onnxruntime
+# optional, only for the ProPainter engine (runs on MPS/CPU, untested):
+# torch torchvision

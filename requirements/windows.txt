@@ -1,0 +1,11 @@
+# Windows with an NVIDIA GPU.
+numpy
+scipy
+pillow>=10.1
+opencv-python-headless
+av>=11
+rapidocr>=3.10
+onnxruntime
+onnx
+onnxconverter-common   # fp16 OCR models on CUDA (wmr/detect.py _fp16): det ~1.8x faster
+# GPU OCR and the ProPainter engine are installed by scripts/setup_windows.ps1
