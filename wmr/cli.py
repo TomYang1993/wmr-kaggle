@@ -42,6 +42,10 @@ def _add_remove(p):
     p.add_argument("--keep-work", action="store_true", help="keep ProPainter working files")
     p.add_argument("--force-fill", action="store_true",
                    help="treat semi-transparent overlays as opaque (use if blend inversion leaves ghost outlines)")
+    p.add_argument("--inpaint", choices=["auto", "lama", "telea"], default="auto",
+                   help="holes no nearby frame can fill: auto = LaMa on a CUDA GPU (downloads 196 MB once), else Telea")
+    p.add_argument("--feather", type=int, default=3,
+                   help="px beyond the mask that are filled and blended (0: hard edge, as before 0.6.0)")
 
 
 def _gpus(args):
@@ -61,7 +65,8 @@ def _do_remove(args, video, tracks, out):
                            force_fill=args.force_fill)
     tot = rm.remove(video, tracks, out, window=args.window, crf=args.crf, preset=args.preset, encoder=args.encoder,
                     device="cpu" if getattr(args, "cpu", False) else "auto",
-                    cap_bitrate=not args.no_bitrate_cap, patches=patches, force_fill=args.force_fill)
+                    cap_bitrate=not args.no_bitrate_cap, patches=patches, force_fill=args.force_fill,
+                    inpaint=args.inpaint, feather=args.feather)
     if work and not args.keep_work:
         import shutil
         shutil.rmtree(work, ignore_errors=True)
@@ -120,8 +125,8 @@ def main(argv=None):
 
     p = sub.add_parser("synth", help="make a test clip with known overlays and ground truth")
     p.add_argument("-o", "--out-dir", required=True)
-    p.add_argument("--overlay", action="append", required=True, metavar="TEXT:MOTION:OPACITY[:SIZE]",
-                   help="motion is static|linear|bounce|teleport; repeatable")
+    p.add_argument("--overlay", action="append", required=True, metavar="TEXT:MOTION:OPACITY[:SIZE[:shadow]]",
+                   help="motion is static|linear|bounce|teleport; shadow adds a soft dark drop shadow; repeatable")
     p.add_argument("--clean", help="clean source video (default: a procedural clip)")
     p.add_argument("--frames", type=int, default=240)
     p.add_argument("--size", default="640x360")
@@ -129,6 +134,9 @@ def main(argv=None):
     p.add_argument("--dwell", type=int, default=60, help="teleport dwell in frames")
     p.add_argument("--speed", type=float, default=3.0, help="pixels per frame for moving overlays")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--blobs", type=int, default=1, help="discs moving on their own (local motion)")
+    p.add_argument("--blob-radius", type=int, default=26)
+    p.add_argument("--exposure", type=float, default=0.0, help="brightness swing, +- levels")
 
     p = sub.add_parser("eval", help="score an output against a synth ground-truth folder")
     p.add_argument("gt_dir")
@@ -166,7 +174,7 @@ def main(argv=None):
                 texts += [t["label"] for t in json.load(fh)["tracks"] if t["enabled"]]
         if not texts:
             sys.exit("verify needs --texts, --text or --tracks")
-        print(json.dumps(evalm.verify(args.video, sorted(set(texts)), use_gpu=not args.cpu), indent=2))
+        print(json.dumps(evalm.verify(args.video, sorted(set(texts)), use_gpu=not args.cpu, tracks=args.tracks), indent=2))
     elif args.cmd == "run":
         import time
         from . import evalm, track
@@ -198,10 +206,13 @@ def main(argv=None):
         if labels and not args.no_verify:
             t0 = clock()
             prof.phase("verify")
-            report["verify"] = evalm.verify(args.out, labels, use_gpu=not args.cpu, ocr=ocr)
+            report["verify"] = evalm.verify(args.out, labels, use_gpu=not args.cpu, ocr=ocr, tracks=tracks)
             secs["verify"] = clock() - t0
             print(f"[verify] {report['verify']['leak_frames']} of {report['verify']['checked_frames']} "
                   "sampled frames still show expected text")
+            for k, r in report["verify"].get("residue", {}).items():
+                print(f"[verify] track {k} residue (template match on the output; ~0.5-0.9 before removal): "
+                      f"median {r['median']:.2f}, p90 {r['p90']:.2f}, {r['share_ge_0.35']:.0%} of frames >= 0.35")
         report["seconds"] = {k: round(v, 2) for k, v in secs.items()}
         print("[run] seconds: " + ", ".join(f"{k} {v:.1f}" for k, v in secs.items()))
         with open(os.path.splitext(args.out)[0] + ".report.json", "w") as fh:
@@ -228,7 +239,8 @@ def main(argv=None):
         from . import synth
         w, h = (int(x) for x in args.size.lower().split("x"))
         synth.synth(args.out_dir, args.overlay, clean=args.clean, frames=args.frames, size=(w, h),
-                    static_scene=args.static_scene, seed=args.seed, dwell=args.dwell, speed=args.speed)
+                    static_scene=args.static_scene, seed=args.seed, dwell=args.dwell, speed=args.speed,
+                    blobs=args.blobs, blob_r=args.blob_radius, exposure=args.exposure)
         print(f"wrote {args.out_dir}/marked.mp4, clean.mp4, gt.json, texts.txt")
     elif args.cmd == "eval":
         from . import evalm

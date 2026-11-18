@@ -1,0 +1,13 @@
+{
+  "id": "yxyxtx/wmr-lama-bench",
+  "title": "wmr lama bench",
+  "code_file": "wmr-lama-bench.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "competition_sources": []
+}

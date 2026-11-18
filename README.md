@@ -74,12 +74,21 @@ can set `"enabled": false` on anything you want to keep.
    wall-bouncing motion model. Aligned crops are accumulated to estimate each overlay's opacity
    map and colour.
 3. **Remove.** One decode, one encode, all overlays together:
-   - tier `alpha` (semi-transparent): the blend is inverted, `I = (J - aW) / (1 - a)`;
-   - tier `fill` (opaque): real pixels are borrowed from nearby frames of the same shot after
-     global-motion compensation; what was never visible is inpainted and kept stable over time.
-4. **Verify.** OCR on the result reports frames where an expected string is still readable.
+   - tier `alpha` (semi-transparent and static): the blend is inverted, `I = (J - aW) / (1 - a)`;
+   - tier `fill` (opaque, two-tone such as text with a drop shadow, or moving): real pixels are borrowed
+     from nearby frames of the same shot after global-motion compensation and brightness matching;
+     what was never visible is inpainted (LaMa on a CUDA GPU, else OpenCV Telea) and kept stable
+     over time. Each filled region reaches `--feather` px (default 3) beyond the mask and is
+     blended into the frame, so there is no hard edge and a soft shadow next to the text goes too.
+4. **Verify.** OCR on the result reports frames where an expected string is still readable, and each
+   track gets a residue score: its gradient template matched on the output where the mark was
+   (~0.5-0.9 before removal, ~0 when clean). It catches ghosts OCR cannot read: outlines, inverted
+   or partial letters.
 
-Opacity at or above 0.7 is treated as opaque. Output is H.264, CRF 21, bitrate capped near the
+Opacity at or above 0.7 is treated as opaque. A moving mark is always filled: nearby frames show what
+is under it, while inverting it left ghost letters wherever the opacity map was off by a pixel.
+LaMa runs in fp16 for crops up to 256x512 (padded) and on every visible GPU. `--inpaint lama|telea` overrides the choice;
+LaMa (big-lama, Apache-2.0, 196 MB) downloads once into the torch hub cache, or set `WMR_LAMA`. Output is H.264, CRF 21, bitrate capped near the
 source's, original timestamps kept, audio stream-copied.
 
 ### tracks.json fields you may want to edit

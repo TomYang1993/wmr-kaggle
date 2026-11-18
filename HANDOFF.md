@@ -17,7 +17,7 @@ Targets: Kaggle (2x T4) for testing, plus macOS (Apple Silicon) and Windows + NV
 
 Design doc (Claude Docs): https://claude.ai/artifact/6zqYnFvd3cvshhJTfsGJZP
 
-## Current state: v0.5.8 (history below)
+## Current state: v0.6.2 (history below)
 
 All synthetic tests pass on Linux CPU. The self-test also ran end to end on Kaggle with v0.2.0; the bugs that run exposed are fixed in 0.2.1.
 
@@ -127,6 +127,59 @@ First real user video: `yxyxtx/huohua-studio-test-data` 072q-1 (1080p30, 942 s, 
 - Baseline is `kaggle/baseline/wmr-0.5.6.zip`; the notebook says `VERSION, BASE = '0.5.8', '0.5.6'`. Bump the code version before the next A/B push.
 - Windows (user's own box, RTX 3070-class 8 GB, never run yet): `setup_windows.ps1` now installs torch from the cu130 index (onnxruntime-gpu 1.31 on PyPI is a CUDA 13 build and borrows torch's CUDA/cuDNN DLLs; cu124 torch would leave OCR on the CPU; needs driver 580+), and `requirements/windows.txt` adds onnx + onnxconverter-common for fp16 OCR. prof.py no longer crashes on Windows (no /proc: wall samples only). Watch GPU memory there: remove peaked at 7.6 GB on a T4 (OCR sessions kept for verify + ~81 frames on the GPU + torch cache).
 
+## Session 2026-11-17 (0.6.0-0.6.1: fill quality — LaMa, consensus borrowing, feather, two-tone marks)
+
+User saw hard-edged, unblended removal regions in 072q-1's output (detection was fine). Causes found in the fill
+code, not detection: borrowed patches pasted with a hard edge after a whole-ring mean check (local motion got
+through), Telea smear for the rest, and shadowed marks either un-blended into an embossed ghost (alpha tier)
+or leaving a shadow outline (fill mask ~3 px past the glyphs). Ideas taken from the remove-watermark-pro skill
+(in-process big-lama TorchScript, 50 px context crops, feathered composite), minus its Mac parts (MPS,
+VideoToolbox, RAM disk, frames on disk).
+
+- `wmr/lama.py`: big-lama.pt (IOPaint's build, md5 e3aa4aaa..., Apache-2.0, 196 MB) via `torch.jit.load`,
+  downloaded once to the torch hub cache (or `WMR_LAMA`); padded to x64 (symmetric). fp32 only (FFT layers).
+  `--inpaint auto|lama|telea` (auto = LaMa when the fill runs on CUDA); holes < 64 px stay Telea; LaMa sees the
+  region + 48 px with other marks masked.
+- Borrowing (both paths now the same batched algorithm; CPU path vectorised, slower on CPU but identical):
+  per-source brightness offset (<= 24 levels) measured on the ring; reject a source if the ring mean OR any
+  16 px ring tile is off (> 2x photo_thr); per pixel take the nearest accepted source that is within 2x
+  photo_thr of the lower median of all accepted sources (>= 3) — rejects objects passing under the mark.
+  `tests/test_fill_torch.py` has a brightness-drift case and a local-object case; both fail with the checks off.
+- `--feather` px (default 3): region filled to 3 px past the mask, weight 1 to 1.5 px then linear to 0.
+  8 px caused borrow artifacts and scored worse; 3 px removed shadow dashes that 0 px left (visual check).
+- Two-tone detection (`alpha.estimate` "two_tone": share of glyph pixels with the opposite brightness change):
+  0.42-0.51 on shadowed synthetic marks, 0.08-0.21 on plain ones; > 0.3 -> tier fill. Shadowed alpha-tier marks
+  had an embossed ghost (edge_err 30 -> 20 on the local clip once filled).
+- Synthetic: `synth --blobs N --blob-radius R --exposure A` and overlay suffix `:shadow`; A/B clip `local`
+  (shadowed marks, 8 moving discs, +-10 brightness). Eval adds `psnr_ring_10px` and `edge_err_near_mask`
+  (gradient-magnitude error near the mark). Ground-truth scores penalise any change to clean pixels, so feather
+  always scores a little worse there; judge seams by eye (side-by-side crops of synthetic clips only).
+- Local CPU results on a 640x360 `local` clip (in-mask PSNR / ring PSNR / edge err): 0.5.8 20.59 / 31.37 / 20.28;
+  0.6.0 LaMa feather 0: 21.92 / 32.47 / 18.89; feather 3: 20.63 / 30.65 / 19.48 (cleanest by eye).
+- Known: in that clip a teleporting mark's first position (frames 0-49) was dropped as "follows the same text"
+  as a static mark next to it (track.py dedupe). Not fixed. LaMa then copies the leaked glyphs into nearby holes.
+- Kaggle A/B 0.6.0 (test kernel v31; in-mask PSNR / edge err; arms 0.5.8 | 0.6.0 Telea | 0.6.0 LaMa):
+  local 25.27/12.54 | 23.67/12.89 | 26.27/11.04; synth1 29.26/11.75 | 29.37/10.55 | 31.17/9.44;
+  long 31.42/10.60 | 31.32/10.57 | 31.50/10.50; hard (alpha only) identical. Ring PSNR ~0.4 dB lower (feather).
+  Telea alone regresses on `local` (stricter borrowing leaves more to Telea); LaMa wins everywhere.
+  LaMa costs ~60 ms per crop on a T4 (local fill 9.6 -> 44.6 s; long 20 -> 60 s): ~2 h projected for 072q-1.
+- Bug found (since before 0.5.8): the "carry the previous output" check used `ok.all()` over the whole
+  region box, never true, so holes were re-inpainted from scratch every frame. 0.6.1: fixed, and a carry must
+  pass the borrow tests (offset, mean, tiles); carried holes are re-inpainted (1:3 blend) every 8th frame
+  (REFRESH). Local clip: carried 33%, LaMa crops 261 -> 156, quality equal, flicker 10.3 -> 9.7.
+  Unchecked carry (96% carried) was frozen under moving objects: ring PSNR -3 dB.
+- Kaggle A/B 0.6.1 (v32; in-mask PSNR / edge err / flicker; 0.5.8 in brackets): local 25.82/11.19/8.61
+  (25.27/12.54/8.27); synth1 31.18/9.41/8.82 (29.26/11.75/8.76); long 31.54/10.50/8.46 (31.42/10.60/8.38);
+  hard identical; same 16.15/31.17 (15.56/38.03). Carried share of holes: local 66%, synth1 77%, long 69%.
+- 072q-1 on 0.6.1 (check kernel v9, output 072q-1.wmr.mp4 kept on Kaggle for the user): 2926 s (0.5.8: 1555).
+  Analyze 534, remove 2065 (fill 2011: LaMa 21,032 crops 1329 s = 63 ms each, borrow 487), verify 313; leaks
+  13 of 1884 (12). Borrowed 57% of filled area (81% on 0.5.8: tile/consensus checks reject more sources in real
+  footage), carried 32% of the rest. GPU0 peak 7.8 GB in remove (tight for an 8 GB card); GPU1 idle in remove.
+  Track 2 stays alpha (opacity 0.59, conf 0.54); its two_tone score is in tracks.json on Kaggle, not fetched.
+- Next levers for the LaMa cost: fp16 at power-of-two padded sizes (cuFFT half needs them), LaMa on GPU1
+  (idle in remove), batching a frame's crops, a higher LAMA_MIN_PX or REFRESH. Needs the user's visual review
+  of 072q-1.wmr.mp4 first (quality vs 0.5.8 on real footage is not measurable here).
+
 ## Package layout (`wmr/`, about 2,000 lines of Python)
 
 | File | Role |
@@ -190,15 +243,51 @@ How to run the checks:
 - Inputs are mounted at `/kaggle/input/datasets/<owner>/<slug>/`, not `/kaggle/input/<slug>`. The notebook therefore searches with `os.walk`.
 - Without the GPU accelerator, the session gets torch `+cpu` and ORT fails to load CUDA 13 libraries. That is harmless: OCR falls back to CPU.
 
+## Session 2026-11-17, later (0.6.2: residue from inverted moving marks; LaMa 2-4x faster)
+
+User screenshots of 072q-1 (0.6.1) showed letter-shaped residue: outlines on skin, blocky bright partial letters
+on a white shirt. Track 2 was the only alpha-tier track (bounce, opacity 0.59, conf 0.54); the other three were
+filled. On the synthetic `same` clip (4x 'Huohua Studio', moving, 0.5-0.65) alpha inversion left dark/inverted
+ghost text; `--force-fill` removed it (local CPU, Telea: edge err 33.5 -> 23.1, in-mask PSNR 16.2 -> 18.9).
+
+- Tier rule (track.py): alpha only for **static** marks that are not opaque/two-tone. A moving mark uncovers its
+  background in nearby frames, so borrowing gets real pixels; inverting it leaves ghosts wherever the opacity
+  map is a pixel or a few percent off (sub-pixel motion, codec, a blurrier estimate on a low-confidence track).
+- Verify residue score (evalm._residue): per track, the gradient template matched (TM_CCOEFF_NORMED, +-2 px)
+  on the output at the track position, on the OCR-sampled frames. Marks score ~0.85-0.91 before removal; ghosts
+  0.48-0.62 (same clip, 0.6.1); clean ~0.0. Logged per track as median / p90 / share >= 0.35 (track.T_LO), and
+  in report.json. It reads text logs only, so real-video residue is measurable without pulling video.
+- LaMa speed (kaggle/bench, T4): `.half()` gives garbage; autocast fp16 works only at power-of-two padded sizes
+  (cuFFT half) and overflows above 256x512 area (256x1024, 512x512: 16/40 crops non-finite; 512x1024: 32/40),
+  always as non-finite output. lama.py: autocast fp16 when the pow2 pad is <= 256x512, an isfinite check redoes
+  the crop in fp32 (logged); fp32 pads to x8 instead of x64 (1.2-1.4x). fill_frame collects a frame's LaMa crops
+  and `Lama.many` runs them one per GPU in threads (all visible GPUs; 2x on T4 x2). No gain: cudnn.benchmark,
+  channels_last, jit.freeze; batch4 +15% (skipped). Stream of 150 varying shapes: 73 ms/crop (0.6.1) -> 40 fp16;
+  TorchScript profiling compiles cost a few seconds per model at start (not per shape).
+- Kaggle A/B 0.6.2 vs 0.6.1 (test kernel v33; in-mask PSNR / edge err / flicker): same 20.02/20.51/18.27
+  (16.15/31.17/24.23); hard 32.80/9.35/8.50 (30.65/11.16/8.81); long 33.00/9.08/7.28 (31.54/10.50/8.46);
+  local and synth1 equal. Residue ~0 on every track of every clip. Remove wall time was 5-23 s longer on these
+  30-110 s clips: second GPU model load + JIT warm-up, and more fill work where tracks left the alpha tier.
+- 072q-1 on 0.6.2 (check kernel v10; output 072q-1.wmr.mp4 on Kaggle for the user): 2378 s (0.6.1: 2926,
+  0.5.8: 1555). Analyze 515, remove 1520 (fill 1474: borrow 503, inpaint 777 for 15,338 LaMa crops ~50 ms each
+  incl. CPU side; 14,652 fp16, 56 non-finite redone in fp32), verify 326. All 4 tracks filled (track 2 left
+  alpha). Leaks 5 of 1884 (13). Residue median 0.00-0.01, p90 <= 0.12, 0% >= 0.35 on every track. Borrowed 65%
+  of filled area, carried 45% of the rest. GPU1 util only 10% in remove: most frames need one LaMa crop, so the
+  second GPU rarely has work; GPU0 peak 8.0 GB (OCR engines stay loaded for verify).
+  Next speed levers: overlap a frame's LaMa with the next frame's borrowing (carry depends on the previous
+  output, so per-track ordering must hold), or free the OCR engines' GPU memory during remove.
+- `same` clip still has mask recall ~0.62 (identical fast marks: tracks miss instances; 28 of 30 frames leak).
+  Tracking problem on that synthetic clip, not seen on 072q-1 (13 of 1884).
+
 ## Known issues and ideas, in rough priority
 
-2. Run on the user's real `BJ` videos and review the discovery results with the user. Burned-in titles can look like watermarks.
+2. Do not run removal on `yxyxtx/video-test-set-1` (the `BJ` videos), `yxyxtx/test-dataset-2`, or v12 / v27 of `huohua-studio-test-data`: they carry third-party marks. Synthetic clips and 072q-1 only.
 3. Static opaque text on a locked-off shot: test the real ProPainter engine on T4.
 4. Speed: tracking, fill and encode are CPU-bound. A 720p, 15 s clip with 3 overlays took about 68 s on 2 CPU cores. Ideas:
    - NVENC for previews;
    - fewer fill offsets;
    - running pass B on a downscaled grey frame.
-5. Outlined or gradient text goes to `fill` (opacity is estimated as one colour).
+5. Outlined, shadowed or gradient text goes to `fill` (opacity is estimated as one colour; 0.6.0 detects two-tone marks). Since 0.6.2 moving marks are always filled; static semi-transparent marks are still inverted (no residue check routes a bad inversion to fill yet; the verify residue score shows it).
 6. Output is always 8-bit H.264; rotation metadata is not applied.
 7. An earlier, unrelated `wmr 0.1.0` build exists in the old cloud workspace (`/home/claude/wmr/src`). Ignore it.
 

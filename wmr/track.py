@@ -780,8 +780,13 @@ def analyze(video, out_json, texts=None, discover=False, sample_fps=3.0, enhance
         if est["ok"]:
             a = est["alpha"]
             mask = cv2.dilate((a > 0.1 * est["median"]).astype(np.uint8), np.ones((2 * d + 1, 2 * d + 1), np.uint8))
-            opaque = est["median"] >= 0.7 or est["color_mad"] > 40
-            tier = "fill" if opaque else "alpha"
+            # two-tone (shadow / outline): 0.42-0.51 on shadowed synthetic marks, 0.08-0.21 without
+            opaque = est["median"] >= 0.7 or est["color_mad"] > 40 or est["two_tone"] > 0.3
+            # Inverting the blend only for marks that stay put: a moving mark uncovers its background
+            # in nearby frames (borrowing gets real pixels), while inverting one leaves ghost letters
+            # where the opacity map is off by a pixel or a few percent ('same' clip: edge error 33.5
+            # inverted vs 23.1 filled; 072q-1 track 2).
+            tier = "alpha" if motion == "static" and not opaque else "fill"
             cv2.imwrite(base + "_alpha.png", (a * 255).round().astype(np.uint8))
         else:
             mask = np.zeros((t.TH, t.TW), np.uint8)
@@ -797,6 +802,7 @@ def analyze(video, out_json, texts=None, discover=False, sample_fps=3.0, enhance
             "frames_present": int(len(idx)), "first": int(idx[0]), "last": int(idx[-1]),
             "confidence": float(t.score[idx].mean()), "low_conf_frames": int(t.low[idx].sum()),
             "alpha": {"ok": bool(est["ok"]), "median": est.get("median"), "samples": est["n"],
+                      "two_tone": est.get("two_tone"),
                       "color": est.get("color"), "why": est.get("why", "")},
             "alpha_gain": 1.0, "note": t.note,
             "files": {"alpha": os.path.basename(base) + "_alpha.png" if est["ok"] else None,
@@ -824,6 +830,8 @@ def load(tracks_json):
         t["pos"] = positions_from_spans(t["spans"], doc["frames"])
         t["mask_img"] = cv2.imread(os.path.join(side, t["files"]["mask"]), cv2.IMREAD_GRAYSCALE) > 127
         t["alpha_img"] = None
+        tp = os.path.join(side, f"t{t['id']}_template.png")
+        t["tmpl_img"] = cv2.imread(tp, cv2.IMREAD_GRAYSCALE).astype(np.float32) if os.path.exists(tp) else None
         if t["files"].get("alpha"):
             a = cv2.imread(os.path.join(side, t["files"]["alpha"]), cv2.IMREAD_GRAYSCALE)
             t["alpha_img"] = a.astype(np.float32) / 255.0

@@ -24,10 +24,13 @@ def frame(i):   # background moves right by DX px per frame
     return cv2.warpAffine(bg, A, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
 
-def case(box_dx, flicker, second=False):
+def case(box_dx, flicker, second=False, gain=0, blob=False):
     """box_dx: overlay moves this many px per frame (source masks partly cover the target hole);
     flicker: every 3rd frame brightened by 40, which the photometric check must reject;
-    second: a static second overlay far from the first, which must be filled as its own region."""
+    second: a static second overlay far from the first, which must be filled as its own region;
+    gain: odd frames brighter by this much, which borrowing must correct (not reject or paste);
+    blob: a dark disc (a local object) at the hole's left end in the 12 nearest frames but not in
+    the target: it touches only a few % of the ring, so only the per-tile check rejects them."""
     buf = []
     for i in range(N):
         C = np.eye(3)
@@ -35,6 +38,11 @@ def case(box_dx, flicker, second=False):
         clean = frame(i)
         if flicker and i % 3 == 0:
             clean = cv2.add(clean, 40)
+        if gain and i % 2:
+            clean = cv2.add(clean, gain)
+        if blob and 0 < abs(i - N // 2) <= 6:
+            clean = clean.copy()
+            cv2.circle(clean, (150, 115), 18, (20, 20, 20), -1)
         m = np.zeros((H, W), bool)
         x = 150 + int((i - N // 2) * box_dx)
         m[100:130, x:x + 110] = True
@@ -65,4 +73,6 @@ case(-DX, False)    # overlay rides with the background: nearest sources are mas
 case(0, True)
 case(-DX, True)
 case(-DX, False, second=True)
+case(0, False, blob=True)
+case(-DX, False, gain=8)   # target frame 20 is even; its nearest sources (odd) are 8 brighter: passes the check, needs correcting
 print("ok")

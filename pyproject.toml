@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wmr"
-version = "0.5.8"
+version = "0.6.2"
 description = "Detect, track and remove text overlays (watermarks) from your own videos"
 readme = "README.md"
 requires-python = ">=3.9"

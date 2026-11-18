@@ -40,6 +40,12 @@ def estimate(sum_, sumsq, n, text_h, tmpl=None):
     if core.sum() < 20:
         out["why"] = "no stable glyph pixels found"
         return out
+    # Two-tone marks (text plus a drop shadow or outline) brighten some glyph pixels and darken
+    # others; one colour cannot invert both (embossed ghost), so the caller fills them instead.
+    dlt = (M - Mbg).sum(2)
+    strong = g0 & (np.abs(dlt) > 15)
+    pol = np.sign(np.median(dlt[core]))
+    out["two_tone"] = round(float((np.sign(dlt[strong]) == -pol).mean()), 3) if strong.any() else 0.0
     Mc, Bc = M[core], Mbg[core]
     # A colour channel cannot exceed 0..255, which bounds the opacity from below; the bound is
     # tight for white, black and other saturated colours. The std-dip estimate is biased low by
