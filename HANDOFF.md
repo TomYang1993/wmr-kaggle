@@ -279,6 +279,31 @@ ghost text; `--force-fill` removed it (local CPU, Telea: edge err 33.5 -> 23.1, 
 - `same` clip still has mask recall ~0.62 (identical fast marks: tracks miss instances; 28 of 30 frames leak).
   Tracking problem on that synthetic clip, not seen on 072q-1 (13 of 1884).
 
+## Session 2026-11-18 (0.6.3 tried: verify during remove, LaMa overlapped; reverted to 0.6.2)
+
+Reverted on Tom's call: -75 s on 072q-1 did not pay for the extra code. The diff is kept locally at
+`kaggle/out/wmr-0.6.3.patch` (gitignored). Only the test notebook's `{VERSION}` path fix stayed.
+
+- Verify runs on the output frames as remove() produces them (evalm.LiveVerify: a thread feeds sampled frames
+  to OCRPool.imap; `remove(on_frame=...)`): no second decode. Frames are checked before encoding.
+- Fill split into fill_start (regions, feather weights, borrowing: needs no earlier output), fill_end (carry
+  check against the previous output, Telea, LaMa crops submitted with Lama.submit) and fill_result (wait,
+  blend). remove() holds a frame whose LaMa runs and completes it after the next frame's fill_start. LaMa
+  devices are ordered with the fill GPU last, so single crops go to GPU1. Output on CPU is bit-identical to
+  0.6.2 on the same tracks (small clip, LaMa on CPU, x264). Note: 0.6.2 itself is not run-to-run identical
+  (its `run` vs `remove` on the same tracks differed in frames 73-85: a carry decision flipping on float noise).
+- 072q-1 (check kernel v11): 2378 -> 2303 s only. Verify 326 -> 1 s, but remove 1520 -> 1747: borrow 503 ->
+  788 s and alpha+motion 462 -> 619 s (the OCR threads, the LaMa thread and GPU0 crops now compete with the
+  main loop on Kaggle's 4 vCPU and GPU0), and the main loop still waits 558 s for LaMa (overlap is one frame's
+  borrowing, ~28 ms, against ~45-60 ms of LaMa per crop; carry needs the previous output complete).
+  Leaks 5 of 1884, residue median <= 0.02 on all tracks (same as 0.6.2). GPU util in remove 35% / 38%.
+- The remove loop is CPU/GIL-bound, not GPU-bound. Bigger levers: split the video at a scene cut near the
+  middle (borrowing and carry never cross a cut) and run two remove processes, one per GPU, then concatenate
+  (needs a GOP start at the split; 4 vCPU limit the gain); fewer LaMa crops (REFRESH, LAMA_MIN_PX); verify OCR
+  on one engine with one thread to cut CPU contention.
+- Test kernel v34 failed before testing: its setup cell had wmr-0.6.1 hard-coded (fixed: uses {VERSION}).
+  Synthetic A/B for 0.6.3 not rerun.
+
 ## Known issues and ideas, in rough priority
 
 2. Do not run removal on `yxyxtx/video-test-set-1` (the `BJ` videos), `yxyxtx/test-dataset-2`, or v12 / v27 of `huohua-studio-test-data`: they carry third-party marks. Synthetic clips and 072q-1 only.
