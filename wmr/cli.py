@@ -74,7 +74,15 @@ def _do_remove(args, video, tracks, out):
 
 
 def main(argv=None):
-    if os.environ.get("WMR_THREADS"):   # see detect.py; OpenCV's pool too
+    from . import backend
+    if not os.environ.get("WMR_THREADS"):
+        n = backend.cpu_quota()
+        if n < (os.cpu_count() or n):   # a CPU share smaller than the cores in view (RunPod pods)
+            # ponytail: child processes (batch workers) inherit the whole share each
+            os.environ["WMR_THREADS"] = str(n)
+    if os.environ.get("WMR_THREADS"):   # see detect.py; OpenCV's pool, torch and BLAS (read at import, later)
+        for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+            os.environ.setdefault(k, os.environ["WMR_THREADS"])
         import cv2
         cv2.setNumThreads(int(os.environ["WMR_THREADS"]))
     ap = argparse.ArgumentParser(prog="wmr", description="Text-overlay removal for your own videos.")

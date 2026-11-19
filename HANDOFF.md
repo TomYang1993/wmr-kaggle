@@ -304,6 +304,24 @@ Reverted on Tom's call: -75 s on 072q-1 did not pay for the extra code. The diff
 - Test kernel v34 failed before testing: its setup cell had wmr-0.6.1 hard-coded (fixed: uses {VERSION}).
   Synthetic A/B for 0.6.3 not rerun.
 
+## Session 2026-11-18, later (RunPod prep, still 0.6.2)
+
+- Tom signed up for RunPod. Kaggle's 4 vCPU for 2 T4s is the bottleneck; RunPod cards list vCPU per GPU
+  (RTX A4000: 18 vCPU, $0.25/hr; RTX 3090: 32 vCPU, $0.50/hr). "N max" on a card = most GPUs one pod
+  (one machine) can have, not a limit on how many pods run at once.
+- A pod shows every host core in `os.cpu_count()` but rents a share (RunPod docs: libraries that size
+  pools from the visible count get throttled). `backend.cpu_quota()` reads cgroup v2 `cpu.max` / v1
+  cfs quota; `cli.main` sets `WMR_THREADS` from it when it is below the visible count, and `WMR_THREADS`
+  now also sets `OMP_NUM_THREADS` / `MKL_NUM_THREADS` / `OPENBLAS_NUM_THREADS` (torch reads them at
+  import). `wmr doctor` prints `cpu_count`, `cpus_usable`, `WMR_THREADS`. `tests/test_cpu_quota.py`.
+  No change on the Mac or wherever the quota equals the visible count. macOS OpenCV (GCD) ignores
+  `setNumThreads` anyway.
+- `scripts/runpod.sh` (+ `requirements/runpod.txt`): install on an official PyTorch template, then one
+  profiled `wmr run` with `gpu.txt` (epoch, per GPU util / MiB every 2 s, joins prof.txt epochs). README
+  "Running on a RunPod GPU pod" has the steps. Not yet run on a pod: onnxruntime-gpu vs the image's CUDA
+  is the likely snag (doctor's `ort_providers` shows it; OCR falls back to CPU otherwise).
+- First test: 072q-1 only (`"Huohua Studio"`), same boundary as Kaggle; fetch only the .txt files.
+
 ## Known issues and ideas, in rough priority
 
 2. Do not run removal on `yxyxtx/video-test-set-1` (the `BJ` videos), `yxyxtx/test-dataset-2`, or v12 / v27 of `huohua-studio-test-data`: they carry third-party marks. Synthetic clips and 072q-1 only.

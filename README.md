@@ -161,6 +161,23 @@ Only for videos you own or have the rights to edit.
 - With the default engine the GPU runs OCR (PP-OCRv6 medium) and H.264 encoding (NVENC p7, about 5x libx264
   medium on T4; at the default bitrate cap it smooths fine grain slightly more than x264); decode, tracking and fill stay on CPU. `--encoder x264` forces software encoding.
 
+## Running on a RunPod GPU pod
+
+Only for videos you own or have the rights to edit. wmr is CPU-bound, so pick a GPU card with many vCPU per
+dollar (e.g. RTX A4000 with 18 vCPU) and an official PyTorch template; any GPU with 8 GB or more will do.
+
+1. **Package** on this Mac: `zip -qr kaggle/build/wmr-runpod.zip wmr scripts requirements pyproject.toml README.md -x '*__pycache__*'`
+2. **Upload** it and the video to `/workspace` on the pod: drag them into the pod's Jupyter Lab, or
+   `runpodctl send <file>` here and `runpodctl receive <code>` on the pod.
+3. **On the pod**: `cd /workspace && unzip -qo wmr-runpod.zip -d wmr && bash wmr/scripts/runpod.sh` installs
+   and prints `wmr doctor` (check `cpus_usable` and that `ort_providers` lists CUDA).
+4. **Run**: `bash wmr/scripts/runpod.sh /workspace/<video>.mp4 "<mark text>"`. `/workspace/out` gets the
+   cleaned video, `results.txt` (log and wall time), `prof.txt` (stage profile) and `gpu.txt` (GPU use every 2 s).
+5. **Stop or terminate the pod** when done: it bills by the second while it runs.
+
+A pod shows every core of its host machine, but only its rented share is usable. wmr reads that share
+from the container's cgroup and caps its OCR, OpenCV, torch and BLAS threads to it; `WMR_THREADS=n` overrides.
+
 ## Tested, and not
 
 Tested on Linux, CPU only, on synthetic clips with exact ground truth (`python tests/test_smoke.py`

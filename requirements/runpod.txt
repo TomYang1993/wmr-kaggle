@@ -1,0 +1,9 @@
+# RunPod GPU pod from an official PyTorch template (torch + CUDA preinstalled); used by scripts/runpod.sh
+numpy
+scipy
+pillow>=10.1
+av>=11
+rapidocr>=3.10
+onnx
+onnxconverter-common   # fp16 OCR models on CUDA (wmr/detect.py)
+# scripts/runpod.sh then installs onnxruntime-gpu (rapidocr 3.x pulls in no ONNX Runtime)

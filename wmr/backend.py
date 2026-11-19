@@ -34,6 +34,25 @@ def ort_providers():
     return list(ort.get_available_providers())
 
 
+def cpu_quota(cgroup="/sys/fs/cgroup"):
+    """CPUs this process may really use. A container renting a share of its host (a RunPod pod)
+    still shows every host core in os.cpu_count(), so thread pools sized from it get throttled;
+    the cgroup quota is the real limit (v2 cpu.max, else v1 cfs quota / period)."""
+    from pathlib import Path
+    n = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    try:
+        q, p = Path(cgroup, "cpu.max").read_text().split()[:2]
+    except (OSError, ValueError):
+        try:
+            q = Path(cgroup, "cpu", "cpu.cfs_quota_us").read_text().strip()
+            p = Path(cgroup, "cpu", "cpu.cfs_period_us").read_text().strip()
+        except OSError:
+            return n
+    if q in ("max", "-1"):
+        return n
+    return max(1, min(n, -(-int(q) // int(p))))
+
+
 def gpu_ids():
     """Indices of visible NVIDIA GPUs (empty on macOS / CPU-only machines)."""
     vis = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -51,7 +70,9 @@ def gpu_ids():
 
 def describe():
     info = {"platform": platform.platform(), "python": platform.python_version(),
-            "machine": platform.machine(), "torch_device": torch_device(), "gpus": gpu_ids()}
+            "machine": platform.machine(), "torch_device": torch_device(), "gpus": gpu_ids(),
+            "cpu_count": os.cpu_count(), "cpus_usable": cpu_quota(),
+            "WMR_THREADS": os.environ.get("WMR_THREADS")}
     try:
         import torch
         info["torch"] = torch.__version__
